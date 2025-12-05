@@ -1,0 +1,153 @@
+# Claude Code Configuration for Strava MCP Server
+
+## Project Summary
+TypeScript MCP server providing comprehensive Strava API integration with 22 tools across activities, athlete data, routes, segments, clubs, and gear.
+
+## Architecture
+- **Entry Point**: `src/index.ts` - MCP server with stdio transport
+- **API Client**: `src/strava-client.ts` - Centralized Strava API client
+- **Authentication**: `src/auth.ts` - OAuth 2.0 with auto token refresh
+- **Tools**: `src/tools/*.ts` - MCP tool definitions by category
+- **Types**: `src/types/strava.ts` - Complete Strava API type definitions
+
+## Key Technical Decisions
+1. **Native Fetch**: Using Node.js 18+ native fetch instead of axios
+2. **Zod Validation**: All tool inputs validated with Zod, converted to JSON Schema for MCP
+3. **Strict TypeScript**: All strict compiler options enabled (noImplicitAny, noUnusedLocals, etc.)
+4. **ES Modules**: Using ESM with `.js` import extensions
+5. **OAuth Management**: Automatic token refresh with 5-minute expiration buffer
+
+## Development Workflow
+```bash
+npm install              # Install dependencies
+npm run setup            # Interactive OAuth setup (one-time)
+npm run build            # Compile TypeScript
+npm run dev              # Watch mode for development
+npm run lint             # ESLint checks
+npm test                 # Run Jest tests
+```
+
+## Tool Registration Pattern
+Tools are automatically discovered and registered. Each tool file exports a creator function:
+
+```typescript
+export function createXyzTools(client: StravaClient) {
+  return {
+    tool_name: {
+      description: string,
+      inputSchema: ZodSchema,
+      handler: async (args) => MCPResponse
+    }
+  }
+}
+```
+
+Main server combines all tools:
+```typescript
+const allTools = {
+  ...createActivityTools(client),
+  ...createAthleteTools(client),
+  // etc.
+};
+```
+
+## Critical Implementation Details
+
+### Zod to JSON Schema Conversion
+MCP SDK requires JSON Schema, but we author in Zod for type safety:
+```typescript
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: Object.entries(allTools).map(([name, tool]) => ({
+      name,
+      description: tool.description,
+      inputSchema: zodToJsonSchema(tool.inputSchema), // ← Critical conversion
+    })),
+  };
+});
+```
+
+### Activity Type Enum Pattern
+For type safety and validation:
+```typescript
+// types/strava.ts
+export const ACTIVITY_TYPES = ['Run', 'Ride', 'Swim', ...] as const;
+export type ActivityType = typeof ACTIVITY_TYPES[number];
+
+// tools/activities.ts
+const activityTypeSchema = z.enum(ACTIVITY_TYPES);
+```
+
+### Authenticated Request Pattern
+All API calls use the centralized request method:
+```typescript
+private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const accessToken = await this.auth.getValidAccessToken(); // Auto-refresh
+  const response = await fetch(`${this.baseUrl}${endpoint}`, {
+    ...options,
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+  // Error handling...
+  return response.json() as Promise<T>;
+}
+```
+
+## Common Maintenance Tasks
+
+### Adding a New Strava API Endpoint
+1. Add TypeScript types to `src/types/strava.ts`
+2. Add method to `StravaClient` class
+3. Create tool in appropriate `src/tools/*.ts` file
+4. Tool auto-registers (no changes to `index.ts` needed)
+
+### Updating OAuth Scopes
+Edit `scripts/setup.ts` scope options. Current options:
+- Minimal: `read,activity:read`
+- Read-only: `read,activity:read_all,profile:read_all`
+- Read+Write: `read,activity:read_all,activity:write,profile:read_all`
+
+### Debugging MCP Integration
+Check logs in Claude Desktop:
+- **macOS**: `~/Library/Logs/Claude/mcp*.log`
+- **Windows**: `%APPDATA%\Claude\logs\mcp*.log`
+
+Common issues:
+- Tools not showing: Verify `zodToJsonSchema()` is called
+- 403 errors: OAuth scope mismatch
+- Token errors: Run `npm run setup` for fresh tokens
+
+## Environment Configuration
+Required environment variables (set via `npm run setup` or `.env`):
+```bash
+STRAVA_CLIENT_ID=...         # From Strava API settings
+STRAVA_CLIENT_SECRET=...     # From Strava API settings
+STRAVA_ACCESS_TOKEN=...      # From OAuth flow
+STRAVA_REFRESH_TOKEN=...     # From OAuth flow
+STRAVA_EXPIRES_AT=...        # Unix timestamp
+```
+
+## Testing Strategy
+- Unit tests: Individual functions and methods
+- Integration tests: API client methods (mocked fetch)
+- Tool tests: End-to-end tool execution (mocked client)
+
+## Performance Considerations
+- Strava rate limits: 100 requests/15min, 1000/day
+- Token refresh adds <100ms latency (cached for 5min buffer)
+- Tool list is generated once per MCP connection
+- No rate limiting implemented (use responsibly)
+
+## Security Notes
+- `.gitignore` excludes `.env` file
+- Tokens are never logged or exposed
+- Client Secret only used for token exchange/refresh
+- MCP runs locally (no network exposure)
+
+## Reference Links
+- [Strava API Docs](https://developers.strava.com/docs/reference/)
+- [MCP Specification](https://modelcontextprotocol.io/)
+- [Zod Documentation](https://zod.dev/)
