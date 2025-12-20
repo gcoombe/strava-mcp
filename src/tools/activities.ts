@@ -1,31 +1,35 @@
 import { z } from 'zod';
 import { StravaClient } from '../strava-client.js';
 import { ACTIVITY_TYPES, ActivityType } from '../types/strava.js';
+import { reduceActivities, reduceActivity } from '../utils/data-reducer.js';
 
 const activityTypeSchema = z.enum(ACTIVITY_TYPES);
 
 export function createActivityTools(client: StravaClient) {
   return {
     get_activities: {
-      description: 'Get logged-in athlete activities with optional filters',
+      description: 'Get logged-in athlete activities with optional filters. Use minimal=true for large datasets to reduce context usage.',
       inputSchema: z.object({
         before: z.number().optional().describe('Unix timestamp to retrieve activities before'),
         after: z.number().optional().describe('Unix timestamp to retrieve activities after'),
         page: z.number().optional().describe('Page number (default: 1)'),
         per_page: z.number().optional().describe('Number of items per page (default: 30, max: 200)'),
+        minimal: z.boolean().optional().describe('Return minimal activity data (strips social metrics, metadata) to reduce context usage'),
       }),
       handler: async (args: {
         before?: number;
         after?: number;
         page?: number;
         per_page?: number;
+        minimal?: boolean;
       }) => {
         const activities = await client.getActivities(args);
+        const data = args.minimal ? reduceActivities(activities) : activities;
         return {
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify(activities, null, 2),
+              text: JSON.stringify(data, null, 2),
             },
           ],
         };
@@ -33,18 +37,20 @@ export function createActivityTools(client: StravaClient) {
     },
 
     get_activity: {
-      description: 'Get detailed information about a specific activity by ID',
+      description: 'Get detailed information about a specific activity by ID. Use minimal=true to reduce context usage.',
       inputSchema: z.object({
         id: z.number().describe('Activity ID'),
         include_all_efforts: z.boolean().optional().describe('Include all segment efforts (default: false)'),
+        minimal: z.boolean().optional().describe('Return minimal activity data (strips social metrics, metadata) to reduce context usage'),
       }),
-      handler: async (args: { id: number; include_all_efforts?: boolean }) => {
+      handler: async (args: { id: number; include_all_efforts?: boolean; minimal?: boolean }) => {
         const activity = await client.getActivity(args.id, args.include_all_efforts);
+        const data = args.minimal ? reduceActivity(activity) : activity;
         return {
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify(activity, null, 2),
+              text: JSON.stringify(data, null, 2),
             },
           ],
         };
