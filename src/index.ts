@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
@@ -58,7 +58,7 @@ if (process.env.STRAVA_ACCESS_TOKEN && process.env.STRAVA_REFRESH_TOKEN && proce
 const client = new StravaClient(auth);
 
 // Create MCP server
-const server = new Server(
+const mcpServer = new McpServer(
   {
     name: 'strava-mcp',
     version: '1.0.0',
@@ -69,6 +69,8 @@ const server = new Server(
     },
   }
 );
+// Access underlying Server for setRequestHandler (advanced use case)
+const server = mcpServer.server;
 
 // Combine all tools
 const allTools = {
@@ -117,7 +119,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // Start server
 async function main() {
   const transport = new StdioServerTransport();
-  await server.connect(transport);
+  await mcpServer.connect(transport);
   console.error('Strava MCP Server running on stdio');
 }
 
