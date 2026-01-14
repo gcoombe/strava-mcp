@@ -12,6 +12,7 @@ export interface StravaTokenResponse {
   expires_at: number;
   expires_in: number;
   token_type: string;
+  athlete?: StravaAthlete; // Included in initial authorization, not in refresh
 }
 
 export interface StravaAthlete {

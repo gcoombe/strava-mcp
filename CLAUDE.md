@@ -11,12 +11,52 @@ This is a Model Context Protocol (MCP) server for Strava API integration. It pro
 ### Building and Running
 - `npm run build` - Compile TypeScript to JavaScript
 - `npm run dev` - Watch mode for development (recompiles on changes)
-- `npm start` - Start the MCP server (requires build first)
+- `npm start` - Start the MCP server in stdio mode (requires build first)
+- `npm run start:http` - Start the HTTP API server (for ChatGPT and REST clients)
 - `npm run setup` - Interactive OAuth setup wizard to configure Strava API tokens
 
 ### Code Quality
 - `npm run lint` - Run ESLint on the codebase
 - `npm test` - Run Jest test suite
+
+## Transport Modes
+
+The server supports two transport modes:
+
+### stdio Mode (Default)
+Used by Claude Desktop and other MCP clients. Start with:
+```bash
+npm start
+```
+
+### HTTP Mode
+REST API for ChatGPT and other HTTP clients. Start with:
+```bash
+npm run start:http
+```
+
+**HTTP Endpoints:**
+- `GET /health` - Health check
+- `GET /tools` - List all available tools with JSON schemas
+- `GET /tools/:name` - Get a specific tool's schema
+- `POST /tools/:name` - Execute a tool (request body = tool arguments)
+
+**Environment Variables (HTTP mode):**
+- `HTTP_PORT` - Port to listen on (default: 3000)
+
+**Example Usage:**
+```bash
+# List all tools
+curl http://localhost:3000/tools
+
+# Get athlete profile
+curl -X POST http://localhost:3000/tools/get_athlete
+
+# Get activities with parameters
+curl -X POST http://localhost:3000/tools/get_activities \
+  -H "Content-Type: application/json" \
+  -d '{"per_page": 10}'
+```
 
 ## Architecture
 
@@ -38,7 +78,11 @@ This is a Model Context Protocol (MCP) server for Strava API integration. It pro
 3. **Tool Definitions** (`src/tools/`): MCP tool implementations
    - Each file exports a creator function that takes StravaClient
    - Tools are defined with: description, Zod inputSchema, and async handler
-   - All tools registered automatically in `src/index.ts`
+   - All tools registered via `src/create-tools.ts`
+
+4. **HTTP Server** (`src/http-server.ts`): Express REST API
+   - Exposes tools as HTTP endpoints for non-MCP clients
+   - Uses same tool definitions as stdio mode
 
 ### Adding New Strava Endpoints
 

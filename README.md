@@ -2,6 +2,15 @@
 
 A Model Context Protocol (MCP) server for integrating with the Strava API. This server provides comprehensive access to all major Strava API endpoints including activities, athlete data, routes, segments, clubs, and gear.
 
+## Transport Modes
+
+This server supports two transport modes per the [MCP specification](https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization):
+
+| Mode | Command | Auth | Use Case |
+|------|---------|------|----------|
+| **stdio** | `npm start` | Environment tokens | Claude Desktop (single user) |
+| **HTTP** | `npm run start:http` | OAuth + JWT | ChatGPT, REST clients (multi-user) |
+
 ## Features
 
 ### Activity Management
@@ -42,10 +51,10 @@ A Model Context Protocol (MCP) server for integrating with the Strava API. This 
 
 ## Installation
 
-1. Clone this repository or create a new directory:
+1. Clone this repository:
 
 ```bash
-mkdir strava-mcp
+git clone https://github.com/gcoombe/strava-mcp.git
 cd strava-mcp
 ```
 
@@ -55,10 +64,10 @@ cd strava-mcp
 npm install
 ```
 
-3. Run the interactive setup to configure OAuth:
+3. Copy the example environment file:
 
 ```bash
-npm run setup
+cp .env.example .env
 ```
 
 4. Build the project:
@@ -76,42 +85,67 @@ npm run build
 3. Fill in the required information:
    - **Application Name**: Your app name
    - **Category**: Choose appropriate category
-   - **Club**: Optional
    - **Website**: Can use `http://localhost` for testing
-   - **Authorization Callback Domain**: Use `localhost` for testing
-4. Click "Create"
-5. Note your **Client ID** and **Client Secret**
+   - **Authorization Callback Domain**: Use `localhost` for local testing, or your domain for production
+4. Note your **Client ID** and **Client Secret**
+5. Add them to your `.env` file
 
-### 2. Run the Setup Script
+### 2. Choose Your Transport Mode
 
-The easiest way to configure OAuth tokens is to use the interactive setup script:
+#### stdio Mode (Claude Desktop)
+
+For single-user use with Claude Desktop:
 
 ```bash
+# Run the interactive setup to get your personal tokens
 npm run setup
+
+# Start the server
+npm start
 ```
 
-This script will:
-1. Prompt you for your Strava Client ID and Client Secret (or use existing ones from `.env`)
-2. Generate an authorization URL for you to visit
-3. Guide you through the OAuth flow
-4. Exchange the authorization code for access/refresh tokens
-5. Automatically save everything to `.env`
+The setup script will guide you through the OAuth flow and save tokens to `.env`.
 
-**Manual Setup (Alternative)**
+#### HTTP Mode (Multi-user)
 
-If you prefer to set up manually, you can exchange the authorization code yourself:
+For multi-user deployments (ChatGPT, REST clients):
 
 ```bash
-curl -X POST https://www.strava.com/oauth/token \
-  -d client_id=YOUR_CLIENT_ID \
-  -d client_secret=YOUR_CLIENT_SECRET \
-  -d code=AUTHORIZATION_CODE \
-  -d grant_type=authorization_code
+# Add HTTP-specific variables to .env:
+# OAUTH_CLIENT_ID=<generate with: openssl rand -hex 16>
+# OAUTH_CLIENT_SECRET=<generate with: openssl rand -hex 16>
+# JWT_SECRET=<generate with: openssl rand -base64 32>
+# STRAVA_REDIRECT_URI=http://localhost:3000/auth/strava/callback
+
+# Start the HTTP server
+npm run start:http
 ```
 
-Then create a `.env` file with all the credentials (see `.env.example`).
+Users authenticate via OAuth at `/auth/authorize` and receive a JWT for API access.
 
-## MCP Configuration
+### ChatGPT Configuration
+
+To use with ChatGPT:
+
+1. Generate OAuth credentials for your `.env`:
+   ```bash
+   echo "OAUTH_CLIENT_ID=$(openssl rand -hex 16)"
+   echo "OAUTH_CLIENT_SECRET=$(openssl rand -hex 16)"
+   ```
+
+2. Expose your server via ngrok or deploy publicly:
+   ```bash
+   ngrok http 3000
+   ```
+
+3. In ChatGPT, configure your MCP server with:
+   - **Server URL**: `https://your-ngrok-url.ngrok-free.dev`
+   - **OAuth Client ID**: Value from your `.env`
+   - **OAuth Client Secret**: Value from your `.env`
+
+ChatGPT will automatically discover the OAuth endpoints via `/.well-known/oauth-authorization-server`.
+
+## MCP Configuration (stdio Mode)
 
 ### Claude Desktop
 
@@ -119,8 +153,6 @@ Add this to your Claude Desktop configuration file:
 
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-The server automatically loads environment variables from a `.env` file in the project root, so you only need to specify the command:
 
 ```json
 {
@@ -135,8 +167,55 @@ The server automatically loads environment variables from a `.env` file in the p
 }
 ```
 
-Make sure your `.env` file contains all required variables (see [Strava API Setup](#strava-api-setup) above).
+## HTTP API Reference
 
+When running in HTTP mode (`npm run start:http`), the following endpoints are available:
+
+### OAuth 2.0 Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/.well-known/oauth-authorization-server` | GET | OAuth server metadata (RFC 8414) |
+| `/auth/authorize` | GET | OAuth authorization endpoint (redirects to Strava) |
+| `/auth/callback` | GET | Internal OAuth callback from Strava |
+| `/auth/token` | POST | Exchange authorization code for JWT |
+| `/auth/me` | GET | Get current athlete info (requires JWT) |
+| `/auth/logout` | POST | Revoke tokens (requires JWT) |
+
+### Tools
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/tools` | GET | - | List all available tools |
+| `/tools/:name` | GET | - | Get tool schema |
+| `/tools/:name` | POST | JWT | Execute a tool |
+
+### Example Usage
+
+```bash
+# Start the server
+npm run start:http
+
+# For ChatGPT: Configure with your server URL and OAuth credentials
+# ChatGPT will handle the OAuth flow automatically
+
+# For manual testing with curl:
+# 1. List tools (no auth required)
+curl http://localhost:3000/tools
+
+# 2. After completing OAuth flow, use the JWT for API calls
+TOKEN="your-jwt-token"
+
+# Get athlete profile
+curl -X POST http://localhost:3000/tools/get_athlete \
+  -H "Authorization: Bearer $TOKEN"
+
+# Get recent activities
+curl -X POST http://localhost:3000/tools/get_activities \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"per_page": 10}'
+```
 
 ## Available Tools
 
@@ -174,6 +253,23 @@ Make sure your `.env` file contains all required variables (see [Strava API Setu
 ### Gear
 - `get_gear` - Get gear details
 
+## Environment Variables
+
+| Variable | Required | Mode | Description |
+|----------|----------|------|-------------|
+| `STRAVA_CLIENT_ID` | Yes | Both | Strava API client ID |
+| `STRAVA_CLIENT_SECRET` | Yes | Both | Strava API client secret |
+| `STRAVA_ACCESS_TOKEN` | Yes | stdio | User's access token |
+| `STRAVA_REFRESH_TOKEN` | Yes | stdio | User's refresh token |
+| `STRAVA_EXPIRES_AT` | Yes | stdio | Token expiration timestamp |
+| `OAUTH_CLIENT_ID` | Yes | HTTP | OAuth client ID for ChatGPT (you create this) |
+| `OAUTH_CLIENT_SECRET` | Yes | HTTP | OAuth client secret for ChatGPT (you create this) |
+| `JWT_SECRET` | Yes | HTTP | Secret for signing JWTs |
+| `JWT_EXPIRES_IN` | No | HTTP | JWT expiration (default: 7d) |
+| `STRAVA_REDIRECT_URI` | Yes | HTTP | OAuth callback URL |
+| `DATABASE_PATH` | No | HTTP | SQLite path (default: ./data/strava-mcp.db) |
+| `HTTP_PORT` | No | HTTP | Server port (default: 3000) |
+
 ## Development
 
 ### Scripts
@@ -182,25 +278,37 @@ Make sure your `.env` file contains all required variables (see [Strava API Setu
 - `npm run dev` - Watch mode for development
 - `npm run lint` - Lint the codebase
 - `npm test` - Run tests
-- `npm start` - Start the MCP server
+- `npm start` - Start MCP server (stdio mode)
+- `npm run start:http` - Start HTTP server
+- `npm run setup` - Interactive OAuth setup
 
 ### Project Structure
 
 ```
 strava-mcp/
 ├── src/
-│   ├── index.ts              # Main MCP server
-│   ├── auth.ts               # OAuth 2.0 authentication
+│   ├── index.ts              # Entry point (mode selection)
+│   ├── auth.ts               # Strava OAuth handling
 │   ├── strava-client.ts      # Strava API client
+│   ├── http-server.ts        # Express HTTP server
+│   ├── create-tools.ts       # Tool initialization
+│   ├── db.ts                 # SQLite database (HTTP mode)
+│   ├── auth/                 # HTTP auth module
+│   │   ├── jwt.ts            # JWT utilities
+│   │   ├── middleware.ts     # Auth middleware
+│   │   └── routes.ts         # OAuth endpoints
 │   ├── types/
-│   │   └── strava.ts         # TypeScript type definitions
-│   └── tools/                # MCP tool implementations
-│       ├── activities.ts
-│       ├── athlete.ts
-│       ├── routes.ts
-│       ├── segments.ts
-│       ├── clubs.ts
-│       └── gear.ts
+│   │   └── strava.ts         # TypeScript definitions
+│   ├── tools/                # MCP tool implementations
+│   │   ├── activities.ts
+│   │   ├── athlete.ts
+│   │   ├── routes.ts
+│   │   ├── segments.ts
+│   │   ├── clubs.ts
+│   │   └── gear.ts
+│   └── utils/
+│       └── data-reducer.ts   # Response optimization
+├── data/                     # SQLite database (HTTP mode)
 ├── package.json
 ├── tsconfig.json
 ├── .env.example
@@ -209,7 +317,9 @@ strava-mcp/
 
 ## Token Refresh
 
-The server automatically refreshes access tokens when they expire. The refresh token is used to obtain a new access token without requiring re-authentication.
+The server automatically refreshes access tokens when they expire:
+- **stdio mode**: Tokens are refreshed in memory
+- **HTTP mode**: Refreshed tokens are persisted to SQLite
 
 ## Rate Limiting
 
@@ -219,12 +329,19 @@ Strava has rate limits:
 
 The server does not currently implement rate limiting, so use responsibly.
 
-
 ## Troubleshooting
 
-### "No tokens available" error
-- Ensure all environment variables are set in `.env` or your MCP client config
-- Verify tokens haven't expired (check `STRAVA_EXPIRES_AT`)
+### "No tokens available" error (stdio mode)
+- Ensure all `STRAVA_*` environment variables are set in `.env`
+- Run `npm run setup` to obtain new tokens
+
+### "JWT_SECRET required" error (HTTP mode)
+- Add `JWT_SECRET` to your `.env` file
+- Generate one with: `openssl rand -base64 32`
+
+### "No tokens found for user" error (HTTP mode)
+- User needs to re-authenticate at `/auth/strava`
+- Tokens may have been revoked by Strava
 
 ### "Failed to refresh token" error
 - Your refresh token may have been revoked
@@ -233,7 +350,6 @@ The server does not currently implement rate limiting, so use responsibly.
 ### Build errors
 - Ensure you're using Node.js 18+ LTS
 - Run `npm install` to ensure all dependencies are installed
-- Check TypeScript version compatibility
 
 ## License
 
@@ -243,4 +359,5 @@ MIT
 
 - [Strava API Documentation](https://developers.strava.com/docs/reference/)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
+- [MCP Authorization Spec](https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization)
 - [Strava API Settings](https://www.strava.com/settings/api)

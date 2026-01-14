@@ -1,13 +1,41 @@
 import { StravaTokens, StravaTokenResponse } from './types/strava.js';
 
+export type TokenRefreshCallback = (tokens: StravaTokens) => void | Promise<void>;
+
 export class StravaAuth {
   private clientId: string;
   private clientSecret: string;
   private tokens: StravaTokens | null = null;
+  private onTokenRefresh?: TokenRefreshCallback;
 
   constructor(clientId: string, clientSecret: string) {
     this.clientId = clientId;
     this.clientSecret = clientSecret;
+  }
+
+  /**
+   * Create a StravaAuth instance with existing tokens
+   * Useful for HTTP mode where tokens come from database
+   */
+  static createWithTokens(
+    clientId: string,
+    clientSecret: string,
+    accessToken: string,
+    refreshToken: string,
+    expiresAt: number,
+    onTokenRefresh?: TokenRefreshCallback
+  ): StravaAuth {
+    const auth = new StravaAuth(clientId, clientSecret);
+    auth.tokens = { accessToken, refreshToken, expiresAt };
+    auth.onTokenRefresh = onTokenRefresh;
+    return auth;
+  }
+
+  /**
+   * Set callback for when tokens are refreshed
+   */
+  setTokenRefreshCallback(callback: TokenRefreshCallback): void {
+    this.onTokenRefresh = callback;
   }
 
   /**
@@ -87,6 +115,11 @@ export class StravaAuth {
       refreshToken: data.refresh_token,
       expiresAt: data.expires_at,
     };
+
+    // Notify callback of token refresh
+    if (this.onTokenRefresh) {
+      await this.onTokenRefresh(this.tokens);
+    }
 
     return this.tokens;
   }
