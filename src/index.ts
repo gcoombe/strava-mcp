@@ -6,8 +6,10 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
+import { readFile, writeFile } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { StravaTokens } from './types/strava.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { initializeServer } from './create-tools.js';
 
@@ -16,10 +18,35 @@ import { initializeServer } from './create-tools.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 dotenv.config({ path: join(__dirname, '..', '.env') });
+const envPath = join(__dirname, '..', '.env');
 
 // Parse command-line arguments
 const args = process.argv.slice(2);
 const useHttpMode = args.includes('--http');
+
+/**
+ * Strava can rotate refresh tokens whenever it refreshes an access token.
+ * Persist the replacement tokens so a later server restart does not revive a
+ * revoked refresh token from .env.
+ */
+async function persistRefreshedTokens(tokens: StravaTokens): Promise<void> {
+  let env = await readFile(envPath, 'utf-8');
+  const values: Record<string, string> = {
+    STRAVA_ACCESS_TOKEN: tokens.accessToken,
+    STRAVA_REFRESH_TOKEN: tokens.refreshToken,
+    STRAVA_EXPIRES_AT: tokens.expiresAt.toString(),
+  };
+
+  for (const [key, value] of Object.entries(values)) {
+    const line = `${key}=${value}`;
+    const pattern = new RegExp(`^${key}=.*$`, 'm');
+    env = pattern.test(env)
+      ? env.replace(pattern, line)
+      : `${env.trimEnd()}\n${line}\n`;
+  }
+
+  await writeFile(envPath, env, 'utf-8');
+}
 
 // Start server in appropriate mode
 async function main() {
@@ -32,7 +59,8 @@ async function main() {
     } else {
       // stdio mode for Claude Desktop (default)
       // Uses env-based tokens for single user
-      const { tools } = initializeServer();
+      const { auth, tools } = initializeServer();
+      auth.setTokenRefreshCallback(persistRefreshedTokens);
       await startStdioServer(tools);
     }
   } catch (error) {
